@@ -1,2 +1,29 @@
-﻿// See https://aka.ms/new-console-template for more information
-Console.WriteLine("Hello, World!");
+﻿using JackAnalyzer;
+
+try
+{
+    if (args.Length > 0)
+    {
+        if (Directory.Exists(args[0]))
+        {
+            ProcessDirectory(args[0]);
+        }
+        else
+        {
+            new Tokenizer(args);
+        }
+    }
+    else
+    {
+        ProcessDirectory(Directory.GetCurrentDirectory());
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine(ex.ToString());
+}
+
+static void ProcessDirectory(string directory)
+{
+    new Tokenizer(Directory.GetFiles(directory, "*.jack"));
+}

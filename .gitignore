@@ -5,3 +5,5 @@
 /obj
 /.vs
 /bin
+/examples
+/Properties/launchSettings.json
