@@ -10,7 +10,7 @@ try
         }
         else
         {
-            new Tokenizer(args);
+            new CompilationEngine(args);
         }
     }
     else
@@ -25,5 +25,5 @@ catch (Exception ex)
 
 static void ProcessDirectory(string directory)
 {
-    new Tokenizer(Directory.GetFiles(directory, "*.jack"));
+    new CompilationEngine(Directory.GetFiles(directory, "*.jack"));
 }
