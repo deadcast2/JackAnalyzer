@@ -1,123 +1,146 @@
-﻿using System.Xml.Linq;
-
-namespace JackAnalyzer;
+﻿namespace JackAnalyzer;
 
 internal class CompilationEngine
 {
     private List<string> _DeclaredClasses = new List<string>();
 
-    public CompilationEngine(string[] filepaths)
+    public CompilationEngine(string[] filePaths)
     {
-        if (filepaths.Length == 0)
-            throw new ArgumentException("At least one file path to translate should be provided.");
-
-        ForwardDeclareClasses(filepaths);
-        
-        Process(filepaths);
-    }
-
-    private void ForwardDeclareClasses(string[] filepaths)
-    {
-        foreach (var filepath in filepaths)
+        foreach (var filePath in filePaths)
         {
-            var tokenXml = new Tokenizer(filepath).Process();
+            ForwardDeclareClasses(filePath);
+        }
 
-            try
-            {
-                _DeclaredClasses.Add(CompileClass(tokenXml, identifyOnly: true));
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Compiler forward declare error for {filepath}: {ex}");
-            }
+        foreach (var filePath in filePaths)
+        {
+            Compile(filePath);
         }
     }
 
-    private void Process(string[] filepaths)
+    private void ForwardDeclareClasses(string filePath)
     {
-        foreach (var filepath in filepaths)
+        try
         {
-            var tokenXml = new Tokenizer(filepath).Process();
-
-            try
-            {
-                var compiledXml = CompileClass(tokenXml);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Compiler error for {filepath}: {ex}");
-            }
+            _DeclaredClasses.AddRange(CompileClass(filePath, identifyOnly: true));
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Compiler forward declare error: {ex}");
         }
     }
 
-    private string CompileClass(string tokenXml, bool identifyOnly = false)
+    private void Compile(string filePath)
     {
-        var tokenElement = XElement.Parse(tokenXml);
+        try
+        {
+            var compiledXml = CompileClass(filePath);
+
+            File.WriteAllLines(Path.ChangeExtension(filePath, "xml"), compiledXml);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Compiler error: {ex}");
+        }
+    }
+
+    private IEnumerable<string> CompileClass(string filePath, bool identifyOnly = false)
+    {
         var xmlLines = new List<string> { "<class>" };
+        var tokenIterator = new TokenIterator(new Tokenizer(filePath).Process());
 
-        var elements = tokenElement.Elements().ToList();
-        if (elements.Count > 3)
+        if (tokenIterator.HasMoreTokens())
+            throw new Exception("No code to process.");
+
+        var currentToken = tokenIterator.Advance();
+
+        if (currentToken.Name == "keyword" && currentToken.Value == "class")
         {
-            if (elements[0].Name == "keyword" && elements[0].Value == "class" &&
-                elements[1].Name == "identifier" &&
-                elements[2].Name == "symbol" && elements[2].Value == "{")
+            if (!tokenIterator.HasMoreTokens())
+                throw new Exception("No class name specified.");
+
+            xmlLines.Add(currentToken.ToString());
+
+            currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "identifier")
             {
-                xmlLines.Add(elements[0].ToString());
-                xmlLines.Add(elements[1].ToString());
-                xmlLines.Add(elements[2].ToString());
+                var identifier = currentToken.Value;
 
-                if (identifyOnly)
-                    return elements[1].Value;
+                if (!tokenIterator.HasMoreTokens())
+                    throw new Exception("Class missing opening curly brace.");
 
-                xmlLines.AddRange(HandleClassDeclarations(elements.Skip(3)));
+                xmlLines.Add(currentToken.ToString());
+
+                currentToken = tokenIterator.Advance();
+
+                if (currentToken.Name == "symbol" && currentToken.Value == "{")
+                {
+                    if (identifyOnly) return new[] { identifier };
+
+                    xmlLines.Add(currentToken.ToString());
+                    xmlLines.AddRange(HandleClassDeclarations(tokenIterator));
+
+                    if (tokenIterator.HasMoreTokens())
+                    {
+                        currentToken = tokenIterator.Advance();
+
+                        if (currentToken.Name == "symbol" && currentToken.Value == "}")
+                        {
+                            xmlLines.Add(currentToken.ToString());
+                        }
+                    }
+                }
             }
-        }
-        else
-        {
-            throw new Exception("Invalid class declaration.");
         }
 
         xmlLines.Add("</class>");
 
-        return string.Concat(xmlLines);
+        return xmlLines;
     }
 
-    private IEnumerable<string> HandleClassDeclarations(IEnumerable<XElement> elements)
+    private IEnumerable<string> HandleClassDeclarations(TokenIterator tokenIterator)
     {
         var xmlLines = new List<string>();
 
-        foreach (var element in elements)
+        while (tokenIterator.HasMoreTokens())
         {
-            if (element.Name == "keyword" && new[] { "static", "field" }.Contains(element.Value))
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "keyword")
             {
-                xmlLines.AddRange(CompileClassVarDec(element));
+                if (new[] { "static", "field" }.Contains(currentToken.Value))
+                {
+                    xmlLines.AddRange(CompileClassVarDec(currentToken.ToString(), tokenIterator));
+                }
+                else if (new[] { "constructor", "function", "method" }.Contains(currentToken.Value))
+                {
+                    xmlLines.AddRange(CompileSubroutineDec(currentToken.ToString(), tokenIterator));
+                }
+                else
+                {
+                    throw new InvalidOperationException("Invalid keyword defined.");
+                }
             }
         }
+
+        tokenIterator.Reverse();
 
         return xmlLines;
     }
 
-    private IEnumerable<string> CompileClassVarDec(XElement element)
+    private IEnumerable<string> CompileClassVarDec(string parentToken, TokenIterator tokenIterator)
     {
-        var xmlLines = new List<string> { "<classVarDec>" };
+        var xmlLines = new List<string> { "<classVarDec>", parentToken };
 
-        if (element.NextNode is XElement typeElement)
+        if (tokenIterator.HasMoreTokens())
         {
-            xmlLines.Add(element.ToString());
-            
-            if ((typeElement.Name == "keyword" && new[] { "int", "char", "boolean" }.Contains(typeElement.Value)) ||
-                (typeElement.Name == "identifier" && _DeclaredClasses.Contains(typeElement.Value)))
+            var currentToken = tokenIterator.Advance();
+
+            if ((currentToken.Name == "keyword" && new[] { "int", "char", "boolean" }.Contains(currentToken.Value)) ||
+                (currentToken.Name == "identifier" && _DeclaredClasses.Contains(currentToken.Value)))
             {
-                xmlLines.Add(typeElement.ToString());
-              
-                if (typeElement.NextNode is XElement varName)
-                {
-                    xmlLines.AddRange(HandleIdentifiers(varName));
-                }
-                else
-                {
-                    throw new Exception("Nothing to process after variable keyword.");
-                }
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(HandleIdentifiers(tokenIterator));
             }
             else
             {
@@ -134,42 +157,495 @@ internal class CompilationEngine
         return xmlLines;
     }
 
-    private IEnumerable<string> HandleIdentifiers(XElement element)
+    private IEnumerable<string> CompileSubroutineDec(string parentToken, TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<subroutineDec>", parentToken };
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if ((currentToken.Name == "keyword" && new[] { "int", "char", "boolean", "void" }.Contains(currentToken.Value)) ||
+                (currentToken.Name == "identifier" && _DeclaredClasses.Contains(currentToken.Value)))
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "identifier")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+                        xmlLines.AddRange(CompileParameterList(tokenIterator));
+                        xmlLines.AddRange(CompileSubroutineBody(tokenIterator));
+                    }
+                }
+            }
+        }
+
+        xmlLines.Add("</subroutineDec>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileSubroutineBody(TokenIterator tokenIterator)
     {
         var xmlLines = new List<string>();
 
-        if (element.Name == "identifier")
+        xmlLines.Add("<subroutineBody>");
+
+        if (tokenIterator.HasMoreTokens())
         {
-            xmlLines.Add(element.ToString());
+            var currentToken = tokenIterator.Advance();
 
-            if (element.NextNode is XElement symbol)
+            if (currentToken.Name == "symbol" && currentToken.Value == "{")
             {
-                if (symbol.Name == "symbol" && symbol.Value == ",")
-                {
-                    xmlLines.Add(symbol.ToString());
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(CompileStatements(tokenIterator));
 
-                    if (symbol.NextNode is XElement value)
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == "}")
                     {
-                        xmlLines.AddRange(HandleIdentifiers(value));
+                        xmlLines.Add(currentToken.ToString());
                     }
                 }
-                else if (symbol.Name == "symbol" && symbol.Value == ";")
+            }
+        }
+
+        xmlLines.Add("</subroutineBody>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileStatements(TokenIterator tokenIterator, bool skipListTag = false)
+    {
+        var xmlLines = new List<string>();
+
+        if (!skipListTag) xmlLines.Add("<statements>");
+
+        while (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "keyword" && new[] { "let", "if", "while", "do", "return" }.Contains(currentToken.Value))
+            {
+                switch (currentToken.Value)
                 {
-                    xmlLines.Add(symbol.ToString());
-                }
-                else
-                {
-                    throw new Exception("Invalid symbol specified for identifier");
+                    case "let":
+                        xmlLines.AddRange(CompileLet(tokenIterator));
+                        break;
+                    case "do":
+                        xmlLines.AddRange(CompileDo(tokenIterator));
+                        break;
+                    case "return":
+                        xmlLines.AddRange(CompileReturn(tokenIterator));
+                        break;
+                    case "if":
+                        xmlLines.AddRange(CompileIf(tokenIterator));
+                        break;
                 }
             }
             else
             {
-                throw new Exception("Nothing to process after identifier");
+                break;
             }
         }
-        else
+
+        if (!skipListTag)
         {
-            throw new Exception("Identifier expected.");
+            xmlLines.Add("</statements>");
+
+            // Don't lose the last token for additional processing after this.
+            tokenIterator.Reverse();
+        }
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileIf(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<ifStatement>" };
+
+        tokenIterator.Reverse();
+
+        // Add the "if" keyword.
+        xmlLines.Add(tokenIterator.Advance().ToString());
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "symbol" && currentToken.Value == "(")
+            {
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(CompileExpression(tokenIterator));
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == ")")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+
+                        if (tokenIterator.HasMoreTokens())
+                        {
+                            currentToken = tokenIterator.Advance();
+
+                            if (currentToken.Name == "symbol" && currentToken.Value == "{")
+                            {
+                                xmlLines.Add(currentToken.ToString());
+                                xmlLines.AddRange(CompileStatements(tokenIterator));
+
+                                if (tokenIterator.HasMoreTokens())
+                                {
+                                    currentToken = tokenIterator.Advance();
+
+                                    if (currentToken.Name == "symbol" && currentToken.Value == "}")
+                                    {
+                                        xmlLines.Add(currentToken.ToString());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        xmlLines.Add("</ifStatement>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileReturn(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<returnStatement>" };
+
+        tokenIterator.Reverse();
+
+        // Add the "return" keyword.
+        xmlLines.Add(tokenIterator.Advance().ToString());
+        xmlLines.AddRange(CompileExpression(tokenIterator));
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "symbol" && currentToken.Value == ";")
+            {
+                xmlLines.Add(currentToken.ToString());
+            }
+        }
+
+        xmlLines.Add("</returnStatement>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileDo(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<doStatement>" };
+
+        tokenIterator.Reverse();
+
+        // Add the "do" keyword.
+        xmlLines.Add(tokenIterator.Advance().ToString());
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "identifier")
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == ".")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+
+                        if (tokenIterator.HasMoreTokens())
+                        {
+                            currentToken = tokenIterator.Advance();
+
+                            if (currentToken.Name == "identifier")
+                            {
+                                xmlLines.Add(currentToken.ToString());
+
+                                // Advance to get ready for expression list.
+                                currentToken = tokenIterator.Advance();
+                            }
+                        }
+                    }
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == "(")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+                        xmlLines.AddRange(CompileExpressionList(tokenIterator));
+
+                        if (tokenIterator.HasMoreTokens())
+                        {
+                            currentToken = tokenIterator.Advance();
+
+                            if (currentToken.Name == "symbol" && currentToken.Value == ")")
+                            {
+                                xmlLines.Add(currentToken.ToString());
+                            }
+                        }
+                    }
+
+                    if (tokenIterator.HasMoreTokens())
+                    {
+                        currentToken = tokenIterator.Advance();
+
+                        if (currentToken.Name == "symbol" && currentToken.Value == ";")
+                        {
+                            xmlLines.Add(currentToken.ToString());
+                        }
+                    }
+                }
+            }
+        }
+
+        xmlLines.Add("</doStatement>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileExpressionList(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<expressionList>" };
+
+        while (tokenIterator.HasMoreTokens())
+        {
+            xmlLines.AddRange(CompileExpression(tokenIterator));
+
+            if (tokenIterator.HasMoreTokens())
+            {
+                var currentToken = tokenIterator.Advance();
+
+                if (currentToken.Name == "symbol" && currentToken.Value == ",")
+                {
+                    xmlLines.Add(currentToken.ToString());
+                    continue;
+                }
+                else
+                {
+                    tokenIterator.Reverse();
+                    break;
+                }
+            }
+        }
+
+        xmlLines.Add("</expressionList>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileLet(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<letStatement>" };
+
+        tokenIterator.Reverse();
+
+        // Add the "let" keyword.
+        xmlLines.Add(tokenIterator.Advance().ToString());
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "identifier")
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == "[")
+                    {
+                        // handle array
+                    }
+                    else if (currentToken.Name == "symbol" && currentToken.Value == "=")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+                        xmlLines.AddRange(CompileExpression(tokenIterator));
+                    }
+
+                    if (tokenIterator.HasMoreTokens())
+                    {
+                        currentToken = tokenIterator.Advance();
+
+                        if (currentToken.Name == "symbol" && currentToken.Value == ";")
+                        {
+                            xmlLines.Add(currentToken.ToString());
+                        }
+                    }
+                }
+            }
+        }
+
+        xmlLines.Add("</letStatement>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileExpression(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<expression>" };
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (new[] { "identifier", "keyword" }.Contains(currentToken.Name.ToString()))
+            {
+                xmlLines.Add("<term>");
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.Add("</term>");
+            }
+            else
+            {
+                tokenIterator.Reverse();
+
+                return new List<string>();
+            }
+        }
+
+        xmlLines.Add("</expression>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileParameterList(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string>();
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "symbol" && currentToken.Value == "(")
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    xmlLines.AddRange(HandleParameters(tokenIterator));
+
+                    if (tokenIterator.HasMoreTokens())
+                    {
+                        currentToken = tokenIterator.Advance();
+
+                        if (currentToken.Name == "symbol" && currentToken.Value == ")")
+                        {
+                            xmlLines.Add(currentToken.ToString());
+                        }
+                    }
+                }
+            }
+        }
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> HandleParameters(TokenIterator tokenIterator, bool skipListTag = false)
+    {
+        var xmlLines = new List<string>();
+
+        if (!skipListTag) xmlLines.Add("<parameterList>");
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if ((currentToken.Name == "keyword" && new[] { "int", "char", "boolean" }.Contains(currentToken.Value)) ||
+                (currentToken.Name == "identifier" && _DeclaredClasses.Contains(currentToken.Value)))
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "identifier")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+
+                        if (tokenIterator.HasMoreTokens())
+                        {
+                            currentToken = tokenIterator.Advance();
+
+                            if (currentToken.Name == "symbol" && currentToken.Value == ",")
+                            {
+                                xmlLines.Add(currentToken.ToString());
+                                xmlLines.AddRange(HandleParameters(tokenIterator, skipListTag: true));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!skipListTag)
+        {
+            xmlLines.Add("</parameterList>");
+
+            // Don't lose the last token for additional processing after this.
+            tokenIterator.Reverse();
+        }
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> HandleIdentifiers(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string>();
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "identifier")
+            {
+                xmlLines.Add(currentToken.ToString());
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == ",")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+                        xmlLines.AddRange(HandleIdentifiers(tokenIterator));
+                    }
+                    else if (currentToken.Name == "symbol" && currentToken.Value == ";")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+                    }
+                    else
+                    {
+                        throw new Exception("Invalid symbol specified for identifier");
+                    }
+                }
+                else
+                {
+                    throw new Exception("Nothing to process after identifier");
+                }
+            }
+            else
+            {
+                throw new Exception("Identifier expected.");
+            }
         }
 
         return xmlLines;
