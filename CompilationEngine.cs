@@ -118,7 +118,7 @@ internal class CompilationEngine
                 }
                 else
                 {
-                    throw new InvalidOperationException("Invalid keyword defined.");
+                    throw new InvalidOperationException($"Invalid keyword defined: {currentToken}.");
                 }
             }
         }
@@ -202,6 +202,7 @@ internal class CompilationEngine
             if (currentToken.Name == "symbol" && currentToken.Value == "{")
             {
                 xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(HandleVarDeclarations(tokenIterator));
                 xmlLines.AddRange(CompileStatements(tokenIterator));
 
                 if (tokenIterator.HasMoreTokens())
@@ -217,6 +218,58 @@ internal class CompilationEngine
         }
 
         xmlLines.Add("</subroutineBody>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> HandleVarDeclarations(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string>();
+
+        while (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "keyword" && currentToken.Value == "var")
+            {
+                xmlLines.AddRange(CompileVarDec(currentToken.ToString(), tokenIterator));
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        tokenIterator.Reverse();
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileVarDec(string parentToken, TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<varDec>", parentToken };
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if ((currentToken.Name == "keyword" && new[] { "int", "char", "boolean" }.Contains(currentToken.Value)) ||
+                (currentToken.Name == "identifier" && _DeclaredClasses.Contains(currentToken.Value)))
+            {
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(HandleIdentifiers(tokenIterator));
+            }
+            else
+            {
+                throw new Exception($"Invalid keyword defined for variable: '{currentToken}'.");
+            }
+        }
+        else
+        {
+            throw new Exception("Nothing to process after defined variable.");
+        }
+
+        xmlLines.Add("</varDec>");
 
         return xmlLines;
     }
@@ -246,6 +299,9 @@ internal class CompilationEngine
                         break;
                     case "if":
                         xmlLines.AddRange(CompileIf(tokenIterator));
+                        break;
+                    case "while":
+                        xmlLines.AddRange(CompileWhile(tokenIterator));
                         break;
                 }
             }
@@ -308,6 +364,42 @@ internal class CompilationEngine
                                     if (currentToken.Name == "symbol" && currentToken.Value == "}")
                                     {
                                         xmlLines.Add(currentToken.ToString());
+
+                                        if (tokenIterator.HasMoreTokens())
+                                        {
+                                            currentToken = tokenIterator.Advance();
+
+                                            if (currentToken.Name == "keyword" && currentToken.Value == "else")
+                                            {
+                                                xmlLines.Add(currentToken.ToString());
+
+                                                if (tokenIterator.HasMoreTokens())
+                                                {
+                                                    currentToken = tokenIterator.Advance();
+
+                                                    if (currentToken.Name == "symbol" && currentToken.Value == "{")
+                                                    {
+                                                        xmlLines.Add(currentToken.ToString());
+                                                        xmlLines.AddRange(CompileStatements(tokenIterator));
+
+                                                        if (tokenIterator.HasMoreTokens())
+                                                        {
+                                                            currentToken = tokenIterator.Advance();
+
+                                                            if (currentToken.Name == "symbol" && currentToken.Value == "}")
+                                                            {
+                                                                xmlLines.Add(currentToken.ToString());
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } 
+                                            else
+                                            {
+                                                // Don't miss the potential "return" statement.
+                                                tokenIterator.Reverse();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -318,6 +410,62 @@ internal class CompilationEngine
         }
 
         xmlLines.Add("</ifStatement>");
+
+        return xmlLines;
+    }
+
+    private IEnumerable<string> CompileWhile(TokenIterator tokenIterator)
+    {
+        var xmlLines = new List<string> { "<whileStatement>" };
+
+        tokenIterator.Reverse();
+
+        // Add the "while" keyword.
+        xmlLines.Add(tokenIterator.Advance().ToString());
+
+        if (tokenIterator.HasMoreTokens())
+        {
+            var currentToken = tokenIterator.Advance();
+
+            if (currentToken.Name == "symbol" && currentToken.Value == "(")
+            {
+                xmlLines.Add(currentToken.ToString());
+                xmlLines.AddRange(CompileExpression(tokenIterator));
+
+                if (tokenIterator.HasMoreTokens())
+                {
+                    currentToken = tokenIterator.Advance();
+
+                    if (currentToken.Name == "symbol" && currentToken.Value == ")")
+                    {
+                        xmlLines.Add(currentToken.ToString());
+
+                        if (tokenIterator.HasMoreTokens())
+                        {
+                            currentToken = tokenIterator.Advance();
+
+                            if (currentToken.Name == "symbol" && currentToken.Value == "{")
+                            {
+                                xmlLines.Add(currentToken.ToString());
+                                xmlLines.AddRange(CompileStatements(tokenIterator));
+
+                                if (tokenIterator.HasMoreTokens())
+                                {
+                                    currentToken = tokenIterator.Advance();
+
+                                    if (currentToken.Name == "symbol" && currentToken.Value == "}")
+                                    {
+                                        xmlLines.Add(currentToken.ToString());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        xmlLines.Add("</whileStatement>");
 
         return xmlLines;
     }
