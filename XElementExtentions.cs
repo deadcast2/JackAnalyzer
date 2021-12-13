@@ -1,4 +1,6 @@
-﻿using System.Xml.Linq;
+﻿using System;
+using System.Xml.Linq;
+using System.Linq;
 
 namespace JackAnalyzer
 {

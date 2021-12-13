@@ -1,52 +1,53 @@
 ﻿using System.Xml.Linq;
 
-namespace JackAnalyzer;
-
-internal class TokenIterator
+namespace JackAnalyzer
 {
-    private readonly XElement _RootElement;
-    private XElement _NextElement;
-
-    public TokenIterator(string xml)
+    internal class TokenIterator
     {
-        _RootElement = _NextElement = XElement.Parse(xml);
-    }
+        private readonly XElement _RootElement;
+        private XElement _NextElement;
 
-    public XElement Next()
-    {
-        if (_NextElement == _RootElement)
+        public TokenIterator(string xml)
         {
-            return _NextElement = (_RootElement.FirstNode as XElement) ?? new XElement("null");
+            _RootElement = _NextElement = XElement.Parse(xml);
         }
 
-        if (_NextElement.NextNode is XElement next)
+        public XElement Next()
         {
-            return _NextElement = next;
+            if (_NextElement == _RootElement)
+            {
+                return _NextElement = (_RootElement.FirstNode as XElement) ?? new XElement("null");
+            }
+
+            if (_NextElement.NextNode is XElement next)
+            {
+                return _NextElement = next;
+            }
+
+            return _NextElement;
         }
 
-        return _NextElement;
-    }
-
-    public XElement Peek(int depth = 1)
-    {
-        var el = _NextElement;
-
-        while (depth > 0)
+        public XElement Peek(int depth = 1)
         {
-            el = el.NextNode as XElement ?? new XElement("null");
+            var el = _NextElement;
 
-            depth--;
+            while (depth > 0)
+            {
+                el = el.NextNode as XElement ?? new XElement("null");
+
+                depth--;
+            }
+
+            return el;
         }
 
-        return el;
-    }
+        public XElement Current() => _NextElement;
 
-    public XElement Current() => _NextElement;
+        public string CurrentAsString() => Current().ToString();
 
-    public string CurrentAsString() => Current().ToString();
-
-    public bool HasMore()
-    {
-        return _NextElement.NextNode != null || _RootElement.FirstNode != null;
+        public bool HasMore()
+        {
+            return _NextElement.NextNode != null || _RootElement.FirstNode != null;
+        }
     }
 }

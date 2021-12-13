@@ -1,29 +1,39 @@
-﻿using JackAnalyzer;
+﻿using System;
+using System.IO;
 
-try
+namespace JackAnalyzer
 {
-    if (args.Length > 0)
+    class Program
     {
-        if (Directory.Exists(args[0]))
+        static void Main(string[] args)
         {
-            ProcessDirectory(args[0]);
+            try
+            {
+                if (args.Length > 0)
+                {
+                    if (Directory.Exists(args[0]))
+                    {
+                        ProcessDirectory(args[0]);
+                    }
+                    else
+                    {
+                        new CompilationEngine(args);
+                    }
+                }
+                else
+                {
+                    ProcessDirectory(Directory.GetCurrentDirectory());
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+            }
         }
-        else
+
+        static void ProcessDirectory(string directory)
         {
-            new CompilationEngine(args);
+            new CompilationEngine(Directory.GetFiles(directory, "*.jack"));
         }
     }
-    else
-    {
-        ProcessDirectory(Directory.GetCurrentDirectory());
-    }
-}
-catch (Exception ex)
-{
-    Console.WriteLine(ex.ToString());
-}
-
-static void ProcessDirectory(string directory)
-{
-    new CompilationEngine(Directory.GetFiles(directory, "*.jack"));
 }
