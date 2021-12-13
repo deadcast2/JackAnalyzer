@@ -12,7 +12,7 @@ internal class TokenIterator
         _RootElement = _NextElement = XElement.Parse(xml);
     }
 
-    public XElement Advance()
+    public XElement Next()
     {
         if (_NextElement == _RootElement)
         {
@@ -27,18 +27,14 @@ internal class TokenIterator
         return _NextElement;
     }
 
-    public XElement Reverse()
-    {
-        if (_NextElement.PreviousNode is XElement previous)
-        {
-            return _NextElement = previous;
-        }
+    public XElement Peek() => _NextElement.NextNode as XElement ?? new XElement("null");
 
-        return _NextElement;
-    }
+    public XElement Current() => _NextElement;
 
-    public bool HasMoreTokens()
+    public string CurrentAsString() => Current().ToString();
+
+    public bool HasMore()
     {
-        return _NextElement.NextNode != null;
+        return _NextElement.NextNode != null || _RootElement.FirstNode != null;
     }
 }
