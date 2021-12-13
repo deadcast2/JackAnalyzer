@@ -232,7 +232,7 @@ internal class CompilationEngine
             throw new Exception("'}' missing for subroutine body.");
 
         xml.Add(it.CurrentAsString());
-        
+
         xml.Add("</subroutineBody>");
 
         return xml;
@@ -274,13 +274,7 @@ internal class CompilationEngine
 
         xml.Add(it.Next().ToString());
 
-        if (!it.HasMore())
-            throw new Exception("Identifier expected for let statement.");
-
-        if (!it.Next().Is("identifier"))
-            throw new Exception("Defined indentifier expected for let statement.");
-
-        xml.Add(it.CurrentAsString());
+        xml.AddRange(GetVarName(it));
 
         if (!it.HasMore())
             throw new Exception("Equals expected for let statement.");
@@ -377,8 +371,6 @@ internal class CompilationEngine
 
         xml.Add(it.Next().ToString());
 
-        xml.AddRange(CompileExpression(it));
-
         if (!it.HasMore())
             throw new Exception("Opening paranthesis expected for if statement.");
 
@@ -468,8 +460,6 @@ internal class CompilationEngine
         xml.Add("<whileStatement>");
 
         xml.Add(it.Next().ToString());
-
-        xml.AddRange(CompileExpression(it));
 
         if (!it.HasMore())
             throw new Exception("Opening paranthesis expected for while statement.");
@@ -574,6 +564,12 @@ internal class CompilationEngine
 
             xml.AddRange(terms);
 
+            if (it.HasMore() && it.Peek().Is("symbol", "+", "-", "*", "/", "&", "|", "<", ">", "="))
+            {
+                xml.Add(it.Next().ToString());
+                xml.AddRange(CompileTerm(it));
+            }
+
             xml.Add("</expression>");
 
             if (it.HasMore() && it.Peek().Is("symbol", ","))
@@ -593,16 +589,69 @@ internal class CompilationEngine
         if (!it.HasMore())
             return xml;
 
-        if (!it.Peek().Is("identifier") &&
-            !it.Peek().Is("integerConstant") &&
-            !it.Peek().Is("keyword"))
-            return xml;
+        if (it.Peek().Is("identifier") ||
+            it.Peek().Is("integerConstant") ||
+            it.Peek().Is("stringConstant") ||
+            it.Peek().Is("symbol", "(", "-", "~") ||
+            it.Peek().Is("keyword"))
+        {
+            xml.Add("<term>");
 
-        xml.Add("<term>");
+            if (it.Peek(2).Is("symbol", "."))
+            {
+                xml.AddRange(CompileSubroutineCall(it));
+            }
+            else if (it.Peek(2).Is("symbol", "["))
+            {
+                xml.AddRange(GetVarName(it));
+            }
+            else if (it.Peek().Is("symbol", "("))
+            {
+                xml.Add(it.Next().ToString());
+                xml.AddRange(CompileExpression(it));
+                xml.Add(it.Next().ToString());
+            }
+            else if (it.Peek().Is("symbol", "-", "~")) // unary ops
+            {
+                xml.Add(it.Next().ToString());
+                xml.AddRange(CompileTerm(it));
+            }
+            else
+            {
+                xml.Add(it.Next().ToString());
+            }
 
-        xml.Add(it.Next().ToString());
+            xml.Add("</term>");
+        }
 
-        xml.Add("</term>");
+        return xml;
+    }
+
+    private IEnumerable<string> GetVarName(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            throw new Exception("Identifier expected for var name.");
+
+        if (!it.Next().Is("identifier"))
+            throw new Exception("Defined indentifier expected for var name.");
+
+        xml.Add(it.CurrentAsString());
+
+        if (it.HasMore() && it.Peek().Is("symbol", "["))
+        {
+            xml.Add(it.Next().ToString());
+            xml.AddRange(CompileExpression(it));
+
+            if (!it.HasMore())
+                throw new Exception("Closing bracket expected for array access.");
+
+            if (!it.Next().Is("symbol"))
+                throw new Exception("Defined closing bracket expected for array access.");
+
+            xml.Add(it.CurrentAsString());
+        }
 
         return xml;
     }

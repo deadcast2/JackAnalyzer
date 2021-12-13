@@ -27,7 +27,19 @@ internal class TokenIterator
         return _NextElement;
     }
 
-    public XElement Peek() => _NextElement.NextNode as XElement ?? new XElement("null");
+    public XElement Peek(int depth = 1)
+    {
+        var el = _NextElement;
+
+        while (depth > 0)
+        {
+            el = el.NextNode as XElement ?? new XElement("null");
+
+            depth--;
+        }
+
+        return el;
+    }
 
     public XElement Current() => _NextElement;
 
