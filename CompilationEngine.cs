@@ -6,7 +6,8 @@ internal class CompilationEngine
     {
         foreach (string path in filePaths)
         {
-            CompileClass(new TokenIterator(new Tokenizer(path).Process()));
+            var xml = CompileClass(new TokenIterator(new Tokenizer(path).Process()));
+            File.WriteAllLines(Path.ChangeExtension(path, "xml"), xml);
         }
     }
 
@@ -224,6 +225,14 @@ internal class CompilationEngine
 
         xml.AddRange(CompileStatements(it));
 
+        if (!it.HasMore())
+            throw new Exception("Expected subroutine body ending.");
+
+        if (!it.Next().Is("symbol", "}"))
+            throw new Exception("'}' missing for subroutine body.");
+
+        xml.Add(it.CurrentAsString());
+        
         xml.Add("</subroutineBody>");
 
         return xml;
@@ -233,7 +242,18 @@ internal class CompilationEngine
     {
         var xml = new List<string> { "<statements>" };
 
-        xml.AddRange(CompileLet(it));
+        while (it.Peek().Is("keyword", "let", "do", "return", "if", "while"))
+        {
+            xml.AddRange(CompileLet(it));
+
+            xml.AddRange(CompileDo(it));
+
+            xml.AddRange(CompileReturn(it));
+
+            xml.AddRange(CompileIf(it));
+
+            xml.AddRange(CompileWhile(it));
+        }
 
         xml.Add("</statements>");
 
@@ -242,15 +262,17 @@ internal class CompilationEngine
 
     private IEnumerable<string> CompileLet(TokenIterator it)
     {
-        var xml = new List<string> { "<letStatement>" };
+        var xml = new List<string>();
 
         if (!it.HasMore())
             return xml;
 
-        if (!it.Next().Is("keyword", "let"))
+        if (!it.Peek().Is("keyword", "let"))
             return xml;
 
-        xml.Add(it.CurrentAsString());
+        xml.Add("<letStatement>");
+
+        xml.Add(it.Next().ToString());
 
         if (!it.HasMore())
             throw new Exception("Identifier expected for let statement.");
@@ -263,7 +285,7 @@ internal class CompilationEngine
         if (!it.HasMore())
             throw new Exception("Equals expected for let statement.");
 
-        if (!it.Next().Is("symbol"))
+        if (!it.Next().Is("symbol", "="))
             throw new Exception("Defined equals expected for let statement.");
 
         xml.Add(it.CurrentAsString());
@@ -273,40 +295,312 @@ internal class CompilationEngine
         if (!it.HasMore())
             throw new Exception("Ending expected for let statement.");
 
-        if (!it.Next().Is("symbol"))
+        if (!it.Next().Is("symbol", ";"))
             throw new Exception("Defined ending expected for let statement.");
 
         xml.Add(it.CurrentAsString());
 
         xml.Add("</letStatement>");
 
-        xml.AddRange(CompileLet(it));
+        return xml;
+    }
+
+    private IEnumerable<string> CompileDo(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            return xml;
+
+        if (!it.Peek().Is("keyword", "do"))
+            return xml;
+
+        xml.Add("<doStatement>");
+
+        xml.Add(it.Next().ToString());
+
+        xml.AddRange(CompileSubroutineCall(it));
+
+        if (!it.HasMore())
+            throw new Exception("Ending expected for do statement.");
+
+        if (!it.Next().Is("symbol", ";"))
+            throw new Exception("Defined ending expected for do statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.Add("</doStatement>");
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileReturn(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            return xml;
+
+        if (!it.Peek().Is("keyword", "return"))
+            return xml;
+
+        xml.Add("<returnStatement>");
+
+        xml.Add(it.Next().ToString());
+
+        xml.AddRange(CompileExpression(it));
+
+        if (!it.HasMore())
+            throw new Exception("Ending expected for return statement.");
+
+        if (!it.Next().Is("symbol", ";"))
+            throw new Exception("Defined ending expected for return statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.Add("</returnStatement>");
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileIf(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            return xml;
+
+        if (!it.Peek().Is("keyword", "if"))
+            return xml;
+
+        xml.Add("<ifStatement>");
+
+        xml.Add(it.Next().ToString());
+
+        xml.AddRange(CompileExpression(it));
+
+        if (!it.HasMore())
+            throw new Exception("Opening paranthesis expected for if statement.");
+
+        if (!it.Next().Is("symbol", "("))
+            throw new Exception("Defined opening paranthesis expected for if statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileExpression(it));
+
+        if (!it.HasMore())
+            throw new Exception("Closing paranthesis expected for if statement.");
+
+        if (!it.Next().Is("symbol", ")"))
+            throw new Exception("Defined closing paranthesis expected for if statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        if (!it.HasMore())
+            throw new Exception("Opening brace expected for if statement.");
+
+        if (!it.Next().Is("symbol", "{"))
+            throw new Exception("Defined opening brace expected for if statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileStatements(it));
+
+        if (!it.HasMore())
+            throw new Exception("Closing brace expected for if statement.");
+
+        if (!it.Next().Is("symbol", "}"))
+            throw new Exception("Defined closing brace expected for if statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileElse(it));
+
+        xml.Add("</ifStatement>");
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileElse(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            return xml;
+
+        if (!it.Peek().Is("keyword", "else"))
+            return xml;
+
+        xml.Add(it.Next().ToString());
+
+        if (!it.HasMore())
+            throw new Exception("Opening brace expected for if statement.");
+
+        if (!it.Next().Is("symbol", "{"))
+            throw new Exception("Defined opening brace expected for if statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileStatements(it));
+
+        if (!it.HasMore())
+            throw new Exception("Closing brace expected for else statement.");
+
+        if (!it.Next().Is("symbol", "}"))
+            throw new Exception("Defined closing brace expected for else statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileWhile(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            return xml;
+
+        if (!it.Peek().Is("keyword", "while"))
+            return xml;
+
+        xml.Add("<whileStatement>");
+
+        xml.Add(it.Next().ToString());
+
+        xml.AddRange(CompileExpression(it));
+
+        if (!it.HasMore())
+            throw new Exception("Opening paranthesis expected for while statement.");
+
+        if (!it.Next().Is("symbol", "("))
+            throw new Exception("Defined opening paranthesis expected for while statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileExpression(it));
+
+        if (!it.HasMore())
+            throw new Exception("Closing paranthesis expected for while statement.");
+
+        if (!it.Next().Is("symbol", ")"))
+            throw new Exception("Defined closing paranthesis expected for while statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        if (!it.HasMore())
+            throw new Exception("Opening brace expected for while statement.");
+
+        if (!it.Next().Is("symbol", "{"))
+            throw new Exception("Defined opening brace expected for while statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.AddRange(CompileStatements(it));
+
+        if (!it.HasMore())
+            throw new Exception("Closing brace expected for while statement.");
+
+        if (!it.Next().Is("symbol", "}"))
+            throw new Exception("Defined closing brace expected for while statement.");
+
+        xml.Add(it.CurrentAsString());
+
+        xml.Add("</whileStatement>");
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileSubroutineCall(TokenIterator it)
+    {
+        var xml = new List<string>();
+
+        if (!it.HasMore())
+            throw new Exception("Expected subroutine call.");
+
+        if (!it.Next().Is("identifier"))
+            throw new Exception("Expected identifier for subroutine call.");
+
+        var identifier = it.CurrentAsString();
+
+        if (!it.HasMore())
+            throw new Exception("Expected expression list definition.");
+
+        if (it.Next().Is("symbol", "("))
+        {
+            xml.Add(identifier);
+            xml.Add(it.CurrentAsString());
+            xml.AddRange(CompileExpressionList(it));
+
+            if (!it.HasMore())
+                throw new Exception("Expected more tokens to finish subroutine call.");
+
+            if (!it.Next().Is("symbol", ")"))
+                throw new Exception("Expected subroutine call closing paranthesis.");
+
+            xml.Add(it.CurrentAsString());
+        }
+        else if (it.Current().Is("symbol", "."))
+        {
+            xml.Add(identifier);
+            xml.Add(it.CurrentAsString());
+            xml.AddRange(CompileSubroutineCall(it));
+        }
+
+        return xml;
+    }
+
+    private IEnumerable<string> CompileExpressionList(TokenIterator it)
+    {
+        var xml = new List<string> { "<expressionList>" };
+
+        xml.AddRange(CompileExpression(it));
+
+        xml.Add("</expressionList>");
 
         return xml;
     }
 
     private IEnumerable<string> CompileExpression(TokenIterator it)
     {
-        var xml = new List<string> { "<expression>" };
+        var xml = new List<string>();
 
-        xml.AddRange(CompileTerm(it));
+        var terms = CompileTerm(it);
 
-        xml.Add("</expression>");
+        if (terms.Count() > 0)
+        {
+            xml.Add("<expression>");
+
+            xml.AddRange(terms);
+
+            xml.Add("</expression>");
+
+            if (it.HasMore() && it.Peek().Is("symbol", ","))
+            {
+                xml.Add(it.Next().ToString());
+                xml.AddRange(CompileExpression(it));
+            }
+        }
 
         return xml;
     }
 
     private IEnumerable<string> CompileTerm(TokenIterator it)
     {
-        var xml = new List<string> { "<term>" };
+        var xml = new List<string>();
 
         if (!it.HasMore())
-            throw new Exception("Term expected for expression.");
+            return xml;
 
-        if (!it.Next().Is("identifier"))
-            throw new Exception("Defined identifier expected for term expression.");
+        if (!it.Peek().Is("identifier") &&
+            !it.Peek().Is("integerConstant") &&
+            !it.Peek().Is("keyword"))
+            return xml;
 
-        xml.Add(it.CurrentAsString());
+        xml.Add("<term>");
+
+        xml.Add(it.Next().ToString());
 
         xml.Add("</term>");
 
